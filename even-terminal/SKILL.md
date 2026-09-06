@@ -7,6 +7,9 @@ description: >-
   バックグラウンド起動し、(4) Even アプリ（even utility）に入力する「ホストIP」と
   「トークン」を、それぞれコピペしやすい形で返す。ユーザーが「even-terminal を起動」
   「G2 に繋ぐ」「ターミナルモードを立ち上げる」等と言ったときに使う。
+  引数や会話でプロジェクト名が指定されていれば（例 `/even-terminal bookrium`、
+  「bookrium で起動して」）、そのプロジェクトを探して `--cwd` に渡す。
+  指定がなければホームディレクトリで起動する。
   G2 から使っていて 401 / 認証エラーが出たときの切り分けにも使う。
 ---
 
@@ -26,6 +29,23 @@ Even Realities G2 の Terminal Mode 用に even-terminal を起動し、接続�
 - Windows + Git Bash（Bash ツール）想定。
 - even-terminal はグローバル導入済み。**推奨の起動コマンドは `even-terminal --interface Tailscale --provider claude`**（IP指定は不要。ネットワークインターフェイス名 `Tailscale` からアダプタのIPv4を直接取得する）。
 - `--tailscale` フラグは使わないのが既定。こちらは内部で `tailscale ip -4` を `execSync` で呼ぶため、バックグラウンド起動時に失敗することがある（PATH に Tailscale を足しても、cmd.exe 経由でも駄目なケースを実測）。`--interface Tailscale` なら同じIP（実測 `100.103.35.66`）が確実に取れる。
+
+## 作業ディレクトリ（プロジェクト指定）
+
+even-terminal が起動する claude エージェントの作業ディレクトリは `--cwd` で決まる。G2 から送るプロンプトは全部このディレクトリ基準で動くので、使いたいプロジェクトがあるなら最初からそこを指しておくと「毎回プロジェクトを探させる」手間がなくなる。
+
+- **指定なし（既定）**: ホーム（`$HOME`）。`--cwd` は付けない。
+- **指定あり**: `$ARGUMENTS`（`/even-terminal bookrium` の `bookrium`）、または会話中の「bookrium で起動して」「skills-public に繋いで」のようなプロジェクト名・パスを使う。次の順で解決する:
+  1. **絶対パスやホーム相対パスが渡されたら**そのまま使う（存在確認だけする）。
+  2. **プロジェクト置き場を直接見る**（即答）: `$HOME/OneDrive/project/<名前>` が存在すればそれ。
+  3. **見つからなければホーム配下を浅く探す**（4秒前後）。部分一致・大文字小文字無視:
+
+     ```
+     find "$HOME" -maxdepth 4 \( -name node_modules -o -name .git -o -name AppData -o -name '.*' \) -prune -o -type d -iname "*<名前>*" -print 2>/dev/null
+     ```
+
+  4. **候補が1つ**ならそれを採用し、返却時に「`<パス>` で起動した」と明示する。**複数**なら一覧を見せてユーザーに選ばせる（例: `bookrium` は `bookrium` / `bookrium2` / `bookrium3` に部分一致する。完全一致があればそれを優先してよいが、一言確認は添える）。**0件**なら見つからなかった旨を伝え、ホームで起動してよいか確認する。
+- 解決したパスは手順4で `--cwd "<パス>"` として渡す。Git Bash 形式（`/c/Users/...`）でも Windows 形式（`C:/Users/...`）でも受け付けるが、スペースを含む可能性があるので必ず引用符で囲む。
 
 ## 手順
 
@@ -106,6 +126,7 @@ exit code で分岐する:
 - ポート 3456 の使用状況を確認: `netstat -ano | grep 3456`
 - 使用中なら even-terminal が**既に起動している**可能性が高い。実行中プロセスからトークンは取り直せないので、ユーザーに「既に起動しているようです。起動し直しますか？」と確認する。
   - ただし手順5のログ読み出しフォールバックが使えるなら、**再起動せずに既存プロセスの Full token を回収できる**（`even-terminal-*.log` の最新ファイルを見る）。停止する前にまずこれを試す。
+  - **プロジェクト指定があるとき**は、既存プロセスの作業ディレクトリが一致しているかも見る。ログにはプロンプト受信ごとに `[session] Launching query: resume=..., cwd=C:\Users\tappe` の形で出る（起動時には出ない）ので、最新ログで `grep -a "cwd=" | tail -1` を見る。今回の指定と違えば**再起動が必要**（1プロセス＝1つの `--cwd`。起動後に切り替える手段はない）。同じなら既存を使えばよい。まだ一度もプロンプトが来ておらず `cwd=` 行がないときは判定できないので、ユーザーに「どのプロジェクトで起動したか」を確認する。
   - 起動し直す場合のみ、その 3456 を掴んでいるプロセスを停止してから次へ。PID は `netstat -ano | grep 3456` の最終列。停止は PowerShell ツールで:
 
     ```
@@ -122,12 +143,18 @@ exit code で分岐する:
   cd "$HOME" && even-terminal --interface Tailscale --provider claude
   ```
 
+  プロジェクト指定があるときは、「作業ディレクトリ」節で解決したパスを `--cwd` で足す。ログは引き続きホームに置く（`--log-file` で明示）:
+
+  ```
+  cd "$HOME" && even-terminal --interface Tailscale --provider claude --cwd "<解決したパス>" --log-file "$HOME/even-terminal-$(date +%Y-%m-%dT%H-%M-%S).log"
+  ```
+
   - **`--tailscale` ではなく `--interface Tailscale` を使う**: `--tailscale` は内部で `tailscale ip -4` を `execSync` で呼ぶため、バックグラウンド起動だと `error: failed to get Tailscale IPv4 address` で落ちることがある（PATH に `/c/Program Files/Tailscale` を足しても、`cmd.exe /c` 経由にしても駄目だった実測あり）。`--interface Tailscale` は Windows のネットワークアダプタ「Tailscale」から直接IPv4を読むので外部コマンドに依存せず、同じIP（実測 `100.103.35.66`）が得られる。
   - **PATH に Tailscale を足す必要はない**（`--interface` 方式は `tailscale` コマンドを呼ばないため）。`--tailscale` をどうしても使う場合のみ `export PATH="$PATH:/c/Program Files/Tailscale"` を付ける。
   - **フォールバック順**: ① `--interface Tailscale` → ② それでも駄目なら `--tailscale`（PATH追加付き）→ ③ どちらも駄目なら `tailscale ip -4` で得たIPを直接指定する方式を検討。
-  - **ホームディレクトリで起動する**（`cd "$HOME"`）: even-terminal は CWD にログファイル（`even-terminal-<timestamp>.log`）を吐くので、プロジェクト内で起動するとリポジトリが汚れる。常にホームで起動してそれを避ける。ユーザーが特定プロジェクトで使いたいと明示した場合のみ、そのディレクトリで起動する。ホームで起動していれば手順5のログ・フォールバックも効く。
+  - **プロセスは常にホームで起動する**（`cd "$HOME"`）: even-terminal は既定で自分の CWD にログファイル（`even-terminal-<timestamp>.log`）を吐くので、プロジェクト内で起動するとリポジトリが汚れる。プロジェクト指定があっても `cd` 先は変えず、`--cwd` でエージェントの作業ディレクトリだけを切り替える。念のため `--log-file` でログ先もホームに固定しておけば、`--cwd` の解釈に関係なく手順5のログ・フォールバックが効く。
   - `even-terminal` が見つからなければ `even-terminal.cmd` を試す。
-  - **CWD の意味**: even-terminal が起動する claude エージェントの作業ディレクトリ＝この実行時の CWD になる。既定はホーム。
+  - **2つのディレクトリを区別する**: プロセスの CWD（`cd` 先。ログの置き場所）と、`--cwd`（claude エージェントの作業ディレクトリ。G2 からのプロンプトが動く場所）は別物。`--cwd` を省くと後者は前者と同じ＝ホームになる。
 
 ### 5. 起動出力を取得して解析
 
@@ -139,7 +166,7 @@ exit code で分岐する:
 
 #### 5-b. バナーが標準出力に出ないときのフォールバック（ログから抜く）
 
-バックグラウンド実行だとバナーが stdout に流れてこないことがある（プロセスは正常に起動していて 3456 も掴んでいるのに出力が空）。その場合は even-terminal が CWD に吐くログファイルから拾う。手順4の通りホーム（`$HOME` / `%USERPROFILE%`）で起動していれば、そこに `even-terminal-<timestamp>.log` がある。
+バックグラウンド実行だとバナーが stdout に流れてこないことがある（プロセスは正常に起動していて 3456 も掴んでいるのに出力が空）。その場合は even-terminal が吐くログファイルから拾う。手順4の通りホーム（`$HOME` / `%USERPROFILE%`）で起動していれば（プロジェクト指定時は `--log-file` でホームを指していれば）、そこに `even-terminal-<timestamp>.log` がある。
 
 - 最新ログを特定して両方を一気に抜く（Bash）:
 
@@ -177,6 +204,7 @@ exit code で分岐する:
 
 - ホストは必ず `IP:3456` の形（ポート番号込み）で返す。IP だけでは Even アプリが繋がらないため、ポート `3456` を付けて1つのコードブロックにまとめる。
 - この2つを Even アプリ（even utility）のホスト/トークン欄に入れると G2 に繋がる旨を一言添える。
+- **作業ディレクトリを一言添える**。プロジェクト指定時は「`<解決したパス>` で起動した」と実パスを示す（部分一致で選んだ場合は特に。別プロジェクトを掴んでいたらここで気付ける）。指定なしなら「ホームで起動」。
 - **トークンは実質シークレット**（このIP＋トークンを知る者は誰でもエージェントを操作できる）。第三者に共有しないよう注意を添える。
 - even-terminal はバックグラウンドで動き続ける（このセッション終了後も残る想定）。止めたいときは 3456 を掴むプロセスを終了する、と伝える（下記の停止手順）。
 
@@ -211,6 +239,7 @@ exit code で分岐する:
 - **認証の判定はファイル読みではなく `claude -p "ok"` のプローブで行う**（手順2）。`expiresAt`（アクセストークン・8時間）が過去なのは1日3回起きる正常状態なので、そこを見て再ログインを案内すると誤診になる。`refreshToken` の文字列有無や `refreshTokenExpiresAt` はサーバ側の失効を検出できないので、判定の根拠にしない。
 - **`claude` コマンド自体が壊れていることがある**（Volta + 自動アップデートで `bin\claude.exe` が消える実測あり）。401 に見えて実はこれ、というケースがあるので手順2の②で切り分ける。復旧は `volta install @anthropic-ai/claude-code`。
 - **起動フラグは `--interface Tailscale` が既定**。`--tailscale` は execSync 依存でバックグラウンド起動時に落ちうるため、フォールバック扱い。
+- **プロジェクト指定は `--cwd` で渡す**（「作業ディレクトリ」節）。指定がなければ付けない＝ホーム。プロジェクト名だけ渡されたら `$HOME/OneDrive/project/<名前>` → ホーム配下の浅い `find` の順で探し、複数候補なら選ばせる。プロセス自体の `cd` 先は常にホームのまま（ログを散らかさないため）。
 - **プロセスの停止**: `netstat -ano | grep 3456` で PID を調べ、PowerShell で `Stop-Process -Id <PID> -Force`。Git Bash の `kill` は Windows ネイティブプロセスに効かないことがあるので、Stop-Process の方が確実。
 - **ログファイルが溜まる**: 起動のたびにホームに `even-terminal-<timestamp>.log` が増える。トークンが平文で入っているので、不要になったものは削除してよい（削除前にユーザーに確認する）。
 - コマンドが見つからないときはフルパス／`.cmd` 版を試す（Windows のグローバル npm bin）。
