@@ -11,18 +11,24 @@ surely-opaque colour) — not by shrinking the alpha — so outlines keep their 
 anti-aliasing but carry no background colour.
 
 A finished transparent PNG of the **same character in the same framing** (e.g. the
-`neutral` portrait when cutting a new expression) is used as a *reference*:
+`neutral` portrait when cutting a new expression) is used as a *reference*. It is aligned
+globally (phase correlation) and locally (block-wise template matching), so a few px of
+generation drift per region does not matter. It:
 
 - decides enclosed background blobs ("holes": gaps between hair strands, arm and body)
-  that a border flood cannot reach — the reference is aligned globally *and* locally
-  around each hole, so a few px of generation drift does not matter;
+  that a border flood cannot reach;
+- gates the "wedge" step: the flood stops where a gap between two hair strands narrows to
+  a 1–2 px blend of white and hair, leaving a white sliver at the root. Pixels that are
+  mostly background against the darkest nearby colour, sit on a thin bright ridge between
+  dark strands, and that the reference calls background, are added to the background. A
+  light opaque feature the reference has there (metal clasp, highlight) is never eaten;
 - supplies alpha where the foreground is too light to solve against white (silver hair,
   white cloth touching the edge);
 - flags where the new silhouette differs from the reference, so a human only inspects
   those spots.
 
 Without a reference everything still works; holes are then kept opaque and listed so
-they can be cut by number.
+they can be cut by number, and leftover slivers can be removed with `--seed x,y`.
 
 ## Usage
 
@@ -39,11 +45,15 @@ uv run --no-project "<this-skill-folder>/scripts/defringe.py" <input.png> [outpu
 
 ### Recommended flow (when run through Claude)
 
-1. Run with `--preview`. Read the printed hole list and open `<out>_preview.png`
-   (left: result on green; right: edge band = blue, cut holes = yellow, uncertain
-   holes = orange, differs-from-reference = red; bottom: 4× zooms of edge points).
-2. Look at every `keep?` hole and every red region. If a `keep?` hole is background,
-   rerun with `--cut N`; if a cut hole was actually part of the figure, `--keep N`.
+1. Run with `--preview`. Read the printed hole / suspect lists and open
+   `<out>_preview.png` (left: result on green; right: edge band = blue, cut holes =
+   yellow, wedge pixels = cyan, uncertain holes = orange, suspects = magenta,
+   differs-from-reference = red; bottom: 4× zooms of edge points and suspects).
+2. Look at every `keep?` hole, every magenta suspect and every red region. If a `keep?`
+   hole is background, rerun with `--cut N`; if a cut hole was part of the figure,
+   `--keep N`; if a suspect is a leftover gap, `--seed x,y` with a point inside it.
+   To see a leftover against a dark background, composite the result on black and zoom
+   (the white specks are invisible on the green preview only when they are tiny).
 3. Confirm the destination before writing into a project folder: the default name
    (`_cut.png`) is a scratch name — ask the user whether to save it under the project's
    final name (e.g. `mao-portrait-pained-a.png`) or keep the scratch file.
@@ -63,9 +73,13 @@ fringe in the first place).
 | `--band N` | Width of the edge ring that is re-solved (default 3 px). 2 for very crisp lineart, 4–5 for soft/blurry edges. |
 | `--holes keep\|cut\|ref` | Policy for enclosed background-coloured blobs (default `ref`: ≥30 % reference-background → cut, 5–30 % → `keep?`, else keep). |
 | `--cut 2,5` / `--keep 3` | Force holes by their printed number. |
+| `--seed x,y;x,y` | Grow the background from these points through thin bright gaps (no reference needed). |
+| `--no-wedge` | Disable the reference-gated growth into thin gaps. |
+| `--protect x,y,w,h;…` | Rectangles the wedge step must leave alone (e.g. a light trim line that a 1 px gap crosses). |
+| `--debug-window x,y,w,h` | Print the wedge-step masks for a window as 0/1 grids (diagnosing a sliver that stays). |
 | `--light-fg N` | If the nearest opaque colour is closer than N (Euclidean RGB) to `bg`, use reference alpha instead of solving (default 48). |
 | `--soften SIGMA` | Gaussian on the band alpha (default 0 = off; 0.5 if edges look stair-stepped). |
-| `--min-hole N` | Ignore enclosed blobs smaller than N px (default 24; they stay opaque). |
+| `--min-hole N` | Kept holes smaller than N px are not listed (default 24). Every blob ≥3 px is still decided. |
 | `--alpha-out PATH` | Also write the alpha as a grey PNG (to continue in Photopea / for masks). |
 | `--preview` | Write `<out_stem>_preview.png`. |
 
@@ -81,6 +95,8 @@ fringe in the first place).
 
 ## Profiles
 
-`profiles/example.json` shows the keys. A per-character profile is only worth adding
-when a character needs non-default values (e.g. light hair → `"light_fg": 70`, or a
-coloured generation background → `"bg": [0, 255, 0]`).
+`profiles/example.json` shows the keys (`wedge_radius` = radius for the darkest-nearby
+colour, `wedge_gate` = px of slack given to the reference in the wedge step). A
+per-character profile is only worth adding when a character needs non-default values
+(e.g. light hair → `"light_fg": 70`, or a coloured generation background →
+`"bg": [0, 255, 0]`).
