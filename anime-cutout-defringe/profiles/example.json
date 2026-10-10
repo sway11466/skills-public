@@ -7,5 +7,9 @@
   "min_hole": 24,
   "max_shift": 24,
   "light_fg": 48,
+  "wedge_radius": 4,
+  "wedge_gate": 2,
+  "wedge_chroma": 45,
+  "wedge_protect": 2,
   "ref": "auto"
 }
