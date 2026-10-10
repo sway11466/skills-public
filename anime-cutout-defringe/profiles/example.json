@@ -1,0 +1,11 @@
+{
+  "bg": [255, 255, 255],
+  "tol": 22,
+  "band": 3,
+  "holes": "ref",
+  "soften": 0,
+  "min_hole": 24,
+  "max_shift": 24,
+  "light_fg": 48,
+  "ref": "auto"
+}

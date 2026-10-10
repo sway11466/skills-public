@@ -8,6 +8,7 @@
 
 | スキル | 概要 |
 |---|---|
+| [anime-cutout-defringe](anime-cutout-defringe/SKILL.md) | 単色（白）背景のアニメ絵キャラを白フチ（フリンジ）なしで切り抜く。縁の α を背景色から逆算し、同キャラ・同フレーミングの完成済み透過 PNG を参照に髪の隙間などの穴を自動判定。 |
 | [even-terminal](even-terminal/SKILL.md) | Even Realities G2 の Terminal Mode 用に `even-terminal` を Tailscale 経由で起動し、接続情報（ホスト・トークン）を返す。 |
 
 ## 導入
@@ -20,6 +21,8 @@ cp -r even-terminal ~/.claude/skills/
 ```
 
 以降、対象の状況（例:「G2 に繋いで」）で Claude Code が自動的にそのスキルを使う。各スキルの前提・手順は各 `SKILL.md` を参照。
+
+Python を使うスキルは実行に [uv](https://docs.astral.sh/uv/) が要る（依存はスクリプト冒頭の PEP 723 で宣言、`uv run` が一時環境を自動生成）。
 
 ## ライセンス
 
